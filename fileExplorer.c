@@ -62,8 +62,6 @@ int main() {
 
         }while(ComprobarComando(comando,orden,argumento1,argumento2) !=0);
 
-        printf("2");
-        
         if (strcmp(orden, "info") == 0) {
                 LeeSuperBloque(&ext_superblock);
         } else if (strcmp(orden, "bytemaps") == 0) {
@@ -129,6 +127,8 @@ void Directorio(EXT_ENTRADA_DIR *directorio, EXT_BLQ_INODOS *inodos) {
 }
 
 int Renombrar(EXT_ENTRADA_DIR *directorio, EXT_BLQ_INODOS *inodos, char *nombreantiguo, char *nombrenuevo) {
+    nombreantiguo[strcspn(nombreantiguo, "\n")] = '\0';
+    nombrenuevo[strcspn(nombrenuevo, "\n")] = '\0';
     for (int i = 0; i < MAX_FICHEROS; i++) {
         if (strcmp(directorio[i].dir_nfich, nombreantiguo) == 0) {
             for (int j = 0; j < MAX_FICHEROS; j++) {
@@ -147,6 +147,7 @@ int Renombrar(EXT_ENTRADA_DIR *directorio, EXT_BLQ_INODOS *inodos, char *nombrea
 }
 
 int Imprimir(EXT_ENTRADA_DIR *directorio, EXT_BLQ_INODOS *inodos, EXT_DATOS *memdatos, char *nombre) {
+    nombre[strcspn(nombre, "\n")] = '\0';
     for (int i = 0; i < MAX_FICHEROS; i++) {
         if (strcmp(directorio[i].dir_nfich, nombre) == 0) {
             EXT_SIMPLE_INODE inode = inodos->blq_inodos[directorio[i].dir_inodo];
@@ -160,12 +161,19 @@ int Imprimir(EXT_ENTRADA_DIR *directorio, EXT_BLQ_INODOS *inodos, EXT_DATOS *mem
             return 0;
         }
     }
+    printf("%s",nombre);
     printf("Error: File not found.\n");
     return -1;
 }
 
 int ComprobarComando(char *comando, char *orden, char *argumento1, char *argumento2) {
-    char *token = strtok(comando, " "); // Tokenize the command string
+ 
+
+        // Clear the argument buffers
+    argumento1[0] = '\0';
+    argumento2[0] = '\0';
+
+   char *token = strtok(comando, " "); // Tokenize the command string
 
     comando[strcspn(comando, "\n")] = '\0';
     
