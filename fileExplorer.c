@@ -11,7 +11,11 @@ void Directorio(EXT_ENTRADA_DIR *directorio, EXT_BLQ_INODOS *inodos);
 int Renombrar(EXT_ENTRADA_DIR *directorio, EXT_BLQ_INODOS *inodos, char *nombreantiguo, char *nombrenuevo);
 int Imprimir(EXT_ENTRADA_DIR *directorio, EXT_BLQ_INODOS *inodos, EXT_DATOS *memdatos, char *nombre);
 int ComprobarComando(char *comando, char *orden, char *argumento1, char *argumento2);
-
+void Grabarinodosydirectorio(EXT_ENTRADA_DIR *directorio, EXT_BLQ_INODOS *inodos, FILE *fich);
+void GrabarByteMaps(EXT_BYTE_MAPS *ext_bytemaps, FILE *fich);
+void GrabarSuperBloque(EXT_SIMPLE_SUPERBLOCK *ext_superblock, FILE *fich);
+void GrabarDatos(EXT_DATOS *memdatos, FILE *fich);
+void GrabarBloque(void *data, size_t size, int block_number, FILE *fich);
 
 int main() {
 	 char comando[LONGITUD_COMANDO];
@@ -97,7 +101,11 @@ int main() {
         } else if (strcmp(orden, "print") == 0) {
             Imprimir(directorio, &ext_blq_inodos, memdatos, argumento1);
         } else if (strcmp(orden, "exit") == 0) {
-            //GrabarDatos(memdatos, fent);
+            //Write back the modified data to the partition file
+            GrabarDatos(memdatos, fent); //Write data blocks
+            Grabarinodosydirectorio(directorio, &ext_blq_inodos, fent); //Write directory and inodes
+            GrabarByteMaps(&ext_bytemaps, fent); //Write bytemaps
+            GrabarSuperBloque(&ext_superblock, fent); //Write superblock
             fclose(fent);
             return 0;
         } else {
@@ -273,4 +281,29 @@ int ComprobarComando(char *comando, char *orden, char *argumento1, char *argumen
         printf("Error: Unknown command '%s'.\n", orden);
         return 1;  // Invalid if the command is not recognized
     }
+}
+
+void GrabarBloque(void *data, size_t size, int block_number, FILE *fich) {
+    fseek(fich, block_number * SIZE_BLOQUE, SEEK_SET);
+    fwrite(data, size, 1, fich);
+}
+
+void GrabarDatos(EXT_DATOS *memdatos, FILE *fich) {
+    // Start writing from the correct block (after the reserved blocks)
+    for (int i = 0; i < MAX_BLOQUES_DATOS; i++) {
+        GrabarBloque(&memdatos[i], sizeof(EXT_DATOS), PRIM_BLOQUE_DATOS + i, fich);
+    }
+}
+
+void Grabarinodosydirectorio(EXT_ENTRADA_DIR *directorio, EXT_BLQ_INODOS *inodos, FILE *fich) {
+    GrabarBloque(directorio, sizeof(EXT_ENTRADA_DIR) * MAX_FICHEROS, 3, fich);
+    GrabarBloque(inodos, sizeof(EXT_BLQ_INODOS), 2, fich);
+}
+
+void GrabarByteMaps(EXT_BYTE_MAPS *ext_bytemaps, FILE *fich) {
+    GrabarBloque(ext_bytemaps, sizeof(EXT_BYTE_MAPS), 1, fich);
+}
+
+void GrabarSuperBloque(EXT_SIMPLE_SUPERBLOCK *ext_superblock, FILE *fich) {
+    GrabarBloque(ext_superblock, sizeof(EXT_SIMPLE_SUPERBLOCK), 0, fich);
 }
