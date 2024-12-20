@@ -10,12 +10,14 @@ void Printbytemaps(EXT_BYTE_MAPS *ext_bytemaps);
 void Directorio(EXT_ENTRADA_DIR *directorio, EXT_BLQ_INODOS *inodos);
 int Renombrar(EXT_ENTRADA_DIR *directorio, EXT_BLQ_INODOS *inodos, char *nombreantiguo, char *nombrenuevo);
 int Imprimir(EXT_ENTRADA_DIR *directorio, EXT_BLQ_INODOS *inodos, EXT_DATOS *memdatos, char *nombre);
+int ComprobarComando(char *comando, char *orden, char *argumento1, char *argumento2);
+
 
 int main() {
-	 char *comando[LONGITUD_COMANDO];
-	 char *orden[LONGITUD_COMANDO];
-	 char *argumento1[LONGITUD_COMANDO];
-	 char *argumento2[LONGITUD_COMANDO];
+	 char comando[LONGITUD_COMANDO];
+	 char orden[LONGITUD_COMANDO];
+	 char argumento1[LONGITUD_COMANDO];
+	 char argumento2[LONGITUD_COMANDO];
 	 
 	 int i,j;
 	 unsigned long int m;
@@ -40,6 +42,7 @@ int main() {
      memcpy(&ext_bytemaps,(EXT_BLQ_INODOS *)&datosfich[1], SIZE_BLOQUE);
      memcpy(&ext_blq_inodos,(EXT_BLQ_INODOS *)&datosfich[2], SIZE_BLOQUE);
      memcpy(&memdatos,(EXT_DATOS *)&datosfich[4],MAX_BLOQUES_DATOS*SIZE_BLOQUE);
+    
     /*
     LeeSuperBloque(&ext_superblock);
     printf ("\n");
@@ -53,6 +56,27 @@ int main() {
     printf ("\n");
     Directorio(&directorio, &ext_blq_inodos);
     Imprimir(&directorio, &ext_blq_inodos, memdatos, "Hola.txt");
+    */
+
+    /*
+    //Debug: Check directory entries
+    printf("Directory:\n");
+    for (int i = 0; i < MAX_FICHEROS; i++) {
+        if (directorio[i].dir_inodo != NULL_INODO) {
+            printf("File: %s, Inode: %d\n", directorio[i].dir_nfich, directorio[i].dir_inodo);
+        }
+    }
+
+    //Debug: Check loaded inodes
+    printf("Inodes:\n");
+    for (int i = 0; i < MAX_INODOS; i++) {
+        EXT_SIMPLE_INODE inode = ext_blq_inodos.blq_inodos[i];
+        printf("Inode %d: Size = %u bytes, Blocks = ", i, inode.size_fichero);
+        for (int j = 0; j < MAX_NUMS_BLOQUE_INODO; j++) {
+            printf("%u ", inode.i_nbloque[j]);
+        }
+        printf("\n");
+    }
     */
     for (;;) {
         do {
@@ -72,7 +96,7 @@ int main() {
             Renombrar(directorio, &ext_blq_inodos, argumento1, argumento2);
         } else if (strcmp(orden, "print") == 0) {
             Imprimir(directorio, &ext_blq_inodos, memdatos, argumento1);
-        } else if (strcmp(orden, "salir") == 0) {
+        } else if (strcmp(orden, "exit") == 0) {
             //GrabarDatos(memdatos, fent);
             fclose(fent);
             return 0;
@@ -94,22 +118,22 @@ void LeeSuperBloque(EXT_SIMPLE_SUPERBLOCK *psup) {
 }
 
 void Printbytemaps(EXT_BYTE_MAPS *ext_bytemaps) {
-    int i;
-
+    //Print the inode and block bitmaps
     printf("Inode Bytemap:\n");
-    for (i = 0; i < MAX_INODOS; i++) {
+    for (int i = 0; i < MAX_INODOS; i++) {
         printf("%d ", ext_bytemaps->bmap_inodos[i]);
     }
     printf("\n");
 
     printf("Block Bytemap:\n");
-    for (i = 0; i < sizeof(ext_bytemaps->bmap_bloques); i++) {
+    for (int i = 0; i < sizeof(ext_bytemaps->bmap_bloques); i++) {
         printf("%d ", ext_bytemaps->bmap_bloques[i]);
     }
     printf("\n");
 }
 
 void Directorio(EXT_ENTRADA_DIR *directorio, EXT_BLQ_INODOS *inodos) {
+    //Print directory listing (file names, sizes, inode and block numbers)
     printf("Directory Listing:\n");
     for (int i = 0; i < MAX_FICHEROS; i++) {
         if (directorio[i].dir_inodo != NULL_INODO) {
@@ -127,16 +151,20 @@ void Directorio(EXT_ENTRADA_DIR *directorio, EXT_BLQ_INODOS *inodos) {
 }
 
 int Renombrar(EXT_ENTRADA_DIR *directorio, EXT_BLQ_INODOS *inodos, char *nombreantiguo, char *nombrenuevo) {
+    //Remove posible newline chars from the old and new name
     nombreantiguo[strcspn(nombreantiguo, "\n")] = '\0';
     nombrenuevo[strcspn(nombrenuevo, "\n")] = '\0';
+    //Search the directory entry with the old name
     for (int i = 0; i < MAX_FICHEROS; i++) {
         if (strcmp(directorio[i].dir_nfich, nombreantiguo) == 0) {
             for (int j = 0; j < MAX_FICHEROS; j++) {
+                //Verify file with the new name doesn't exist
                 if (strcmp(directorio[j].dir_nfich, nombrenuevo) == 0) {
                     printf("Error: File with the new name already exists.\n");
                     return -1;
                 }
             }
+            //If it doesn't exist we change the name of the entry in the directory
             strncpy(directorio[i].dir_nfich, nombrenuevo, LEN_NFICH);
             printf("File renamed successfully.\n");
             return 0;
@@ -146,23 +174,44 @@ int Renombrar(EXT_ENTRADA_DIR *directorio, EXT_BLQ_INODOS *inodos, char *nombrea
     return -1;
 }
 
+
 int Imprimir(EXT_ENTRADA_DIR *directorio, EXT_BLQ_INODOS *inodos, EXT_DATOS *memdatos, char *nombre) {
+    //Remove newline char from the filename
     nombre[strcspn(nombre, "\n")] = '\0';
+        
+    //Find the directory entry for the specified file
     for (int i = 0; i < MAX_FICHEROS; i++) {
         if (strcmp(directorio[i].dir_nfich, nombre) == 0) {
-            EXT_SIMPLE_INODE inode = inodos->blq_inodos[directorio[i].dir_inodo];
-            printf("Contents of %s:\n", nombre);
-            for (int j = 0; j < MAX_NUMS_BLOQUE_INODO; j++) {
-                if (inode.i_nbloque[j] != NULL_BLOQUE) {
-                    printf("%.*s", SIZE_BLOQUE, memdatos[inode.i_nbloque[j]].dato);
-                }
+            unsigned short int inodo = directorio[i].dir_inodo;
+            
+            //Check that inode number is valid
+            if (inodo >= MAX_INODOS) {
+                printf("Inode not valid.\n");
+                return -1;
             }
+
+            //Get inode information
+            EXT_SIMPLE_INODE inode = inodos->blq_inodos[inodo];
+
+            printf("Contents of %s:\n", nombre);
+            //Iterate through the blocks 
+            for (int j = 0; j < MAX_NUMS_BLOQUE_INODO; j++) {
+                unsigned short int block_num = inode.i_nbloque[j];
+                //Check if we have reached the end of the file's block
+                if (block_num == NULL_BLOQUE) break;
+
+                //Access the data block using memdatos and the block number
+                printf("%s", (char *)memdatos[block_num - PRIM_BLOQUE_DATOS].dato);
+            }
+            
             printf("\n");
+            
             return 0;
         }
     }
-    printf("%s",nombre);
-    printf("Error: File not found.\n");
+
+    printf("File not found.\n");
+    
     return -1;
 }
 
