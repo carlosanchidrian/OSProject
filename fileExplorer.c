@@ -16,6 +16,14 @@ void GrabarByteMaps(EXT_BYTE_MAPS *ext_bytemaps, FILE *fich);
 void GrabarSuperBloque(EXT_SIMPLE_SUPERBLOCK *ext_superblock, FILE *fich);
 void GrabarDatos(EXT_DATOS *memdatos, FILE *fich);
 void GrabarBloque(void *data, size_t size, int block_number, FILE *fich);
+int fetchfile(EXT_ENTRADA_DIR *directorio, EXT_BLQ_INODOS *inodos, char *nombreorigen);
+int Copiar(EXT_ENTRADA_DIR *directorio, EXT_BLQ_INODOS *inodos,
+           EXT_BYTE_MAPS *ext_bytemaps, EXT_SIMPLE_SUPERBLOCK *ext_superblock,
+           EXT_DATOS *memdatos, char *nombreorigen, char *nombredestino,  FILE *fich);
+unsigned int FindFirstFreeInode(EXT_BYTE_MAPS *ext_bytemaps);
+int removefiles (EXT_ENTRADA_DIR *directorio, EXT_BLQ_INODOS *inodos,
+           EXT_BYTE_MAPS *ext_bytemaps, EXT_SIMPLE_SUPERBLOCK *ext_superblock,
+           EXT_DATOS *memdatos, char *nombrearchivo, FILE *fich);
 
 int main() {
 	 char comando[LONGITUD_COMANDO];
@@ -108,13 +116,56 @@ int main() {
             GrabarSuperBloque(&ext_superblock, fent); //Write superblock
             fclose(fent);
             return 0;
-        } else {
+        } 
+        else if (strcmp(orden, "copy") == 0) { 
+            int copyCheck = Copiar(directorio, &ext_blq_inodos, &ext_bytemaps, &ext_superblock, memdatos, argumento1, argumento2, fent);
+    
+            switch (copyCheck) {
+                case 0:
+                    printf("File '%s' successfully copied to '%s'.\n", argumento1, argumento2);
+                    break;
+                case -1:
+                    printf("Error: Source file '%s' not found or destination file '%s' already exists.\n", argumento1, argumento2);
+                    break;
+                case -2:
+                    printf("Error: No free inodes available to copy the file.\n");
+                    break;
+                case -3:
+                    printf("Error: No free directory entries available to copy the file.\n");
+                    break;
+                case -4:
+                    printf("Error: No free blocks available to copy the file.\n");
+                    break;
+                case -5:
+                    printf("Error: FILENAMES!! The file does not exist or the file you are trying to create already exists.\n");
+                    break;
+                default:
+                    printf("Unknown error occurred during file copy , Error Code %d.\n", copyCheck);
+                    break;
+            }
+        } 
+                else if (strcmp(orden, "remove") == 0) {
+                    // Call the remove function and check the result
+                    int removecheck = removefiles(directorio, &ext_blq_inodos, &ext_bytemaps, &ext_superblock, memdatos, argumento1, fent);
+
+                    if (removecheck == 0) {
+                        // Successful removal
+                        printf("File '%s' successfully removed.\n", argumento1);
+                    } else if (removecheck == -1) {
+                        // Error: File not found
+                        printf("Error: File not found.\n");
+                    } else {
+                    // Unexpected error
+                    printf("An unknown error occurred while trying to remove the file.\n");
+            }
+
+        }else {
             printf("Unknown command.\n");
         }
-    }
+    
     //return 0;
+    }
 }
-
 void LeeSuperBloque(EXT_SIMPLE_SUPERBLOCK *psup) {
     printf("Superblock Information:\n");
     printf("Total inodes: %u\n", psup->s_inodes_count);
@@ -256,7 +307,7 @@ int ComprobarComando(char *comando, char *orden, char *argumento1, char *argumen
     }
 
     // Check the command and arguments
-    if (strcmp(orden, "info") == 0 || strcmp(orden, "bytemaps") == 0 || strcmp(orden, "dir") == 0 || strcmp(orden, "exit") == 0) {
+    if (strcmp(orden, "info") == 0 || strcmp(orden, "bytemaps") == 0 || strcmp(orden, "dir") == 0 || strcmp(orden, "exit" ) == 0) {
         if (argumento1[0] != '\0' || argumento2[0] != '\0') {
             printf("Error: Command '%s' does not take arguments.\n", orden);
             return 1;  // Invalid if arguments are provided for these commands
@@ -277,10 +328,24 @@ int ComprobarComando(char *comando, char *orden, char *argumento1, char *argumen
         } else {
             return 0; // Valid command
         }
+    }  else if (strcmp(orden, "copy") == 0) {
+        if (argumento1[0] == '\0' || argumento2[0] == '\0') {
+            printf("Error: Command 'copy' requires two arguments: old name and name of the copy.\n");
+            return 1;  // Invalid if missing arguments
+        } else {
+            return 0; // Valid command
+        }
+            } else if (strcmp(orden, "remove") == 0) {
+        if (argumento1[0] == '\0') {
+            printf("Error: Command '%s' requires a file name as an argument.\n", orden);
+            return 1;  // Invalid if no argument is given
+        } else {
+            return 0; // Valid command
+        }
     } else {
         printf("Error: Unknown command '%s'.\n", orden);
         return 1;  // Invalid if the command is not recognized
-    }
+    } 
 }
 
 void GrabarBloque(void *data, size_t size, int block_number, FILE *fich) {
@@ -301,9 +366,222 @@ void Grabarinodosydirectorio(EXT_ENTRADA_DIR *directorio, EXT_BLQ_INODOS *inodos
 }
 
 void GrabarByteMaps(EXT_BYTE_MAPS *ext_bytemaps, FILE *fich) {
-    GrabarBloque(ext_bytemaps, sizeof(EXT_BYTE_MAPS), 1, fich);
+    // Write the inode bitmap
+    GrabarBloque(ext_bytemaps->bmap_inodos, sizeof(ext_bytemaps->bmap_inodos), 1, fich);
+
+    // Write the block bitmap
+    GrabarBloque(ext_bytemaps->bmap_bloques, sizeof(ext_bytemaps->bmap_bloques), 1, fich);
 }
+
 
 void GrabarSuperBloque(EXT_SIMPLE_SUPERBLOCK *ext_superblock, FILE *fich) {
     GrabarBloque(ext_superblock, sizeof(EXT_SIMPLE_SUPERBLOCK), 0, fich);
+}
+int fetchfile(EXT_ENTRADA_DIR *directorio, EXT_BLQ_INODOS *inodos, char *nombreorigen) {
+    // Iterate through the directory entries
+    for (int i = 0; i < MAX_FICHEROS; i++) {
+        // Check if the directory entry is valid (not empty)
+        if (directorio[i].dir_inodo != NULL_INODO) {
+            // Compare the file name and return index if names match
+            if (strcmp(directorio[i].dir_nfich, nombreorigen) == 0) {
+                return i; // Return the position in the 'directorio' array
+            }
+        }
+    }
+    // If the file was not found, return 0
+    return 0;
+}
+
+int Copiar(EXT_ENTRADA_DIR *directorio, EXT_BLQ_INODOS *inodos,
+           EXT_BYTE_MAPS *ext_bytemaps, EXT_SIMPLE_SUPERBLOCK *ext_superblock,
+           EXT_DATOS *memdatos, char *nombreorigen, char *nombredestino, FILE *fich) {
+
+    int i, j, k, size;
+    int fileFound;
+    unsigned int originBlock, freeInode, freeBlock, copiedblock, dirEntry, originInode;
+    unsigned short int blockNumber;
+    unsigned short int copiedBlocks[MAX_NUMS_BLOQUE_INODO];
+    int namecheck = 0;
+    nombreorigen[strcspn(nombreorigen, "\n")] = '\0';
+    nombredestino[strcspn(nombredestino, "\n")] = '\0';
+
+    originBlock = 0; // Initialize originBlock
+    freeInode = NULL_INODO;
+    dirEntry = 0;
+    fileFound = 0;
+    
+
+    // Check if the destination file already exists
+    i = 0;
+
+    i = fetchfile(directorio, inodos, nombreorigen);
+    namecheck = fetchfile(directorio, inodos, nombredestino);
+
+    if (i != 0 && namecheck == 0) {
+        fileFound = 1;
+        j = 0;
+        do {
+            blockNumber = inodos->blq_inodos[directorio[i].dir_inodo].i_nbloque[j];
+            if (blockNumber != NULL_BLOQUE) {
+                originBlock++;
+            }
+            j++;
+        } while ((blockNumber != NULL_BLOQUE) && (j < MAX_NUMS_BLOQUE_INODO));
+
+        // Search for the first free inode
+        freeInode = FindFirstFreeInode(ext_bytemaps);
+        if (freeInode == NULL_INODO) {
+            return -1; // No free inode
+        }
+
+        // Search for the first free directory entry
+        dirEntry == 0;
+        while (dirEntry < MAX_FICHEROS && directorio[dirEntry].dir_inodo != NULL_INODO) {
+            dirEntry++;
+        }
+
+        if (dirEntry == MAX_FICHEROS) {
+            return -2; // No free directory entry
+        }
+        //Mark inode as used
+        ext_bytemaps->bmap_inodos[freeInode] = 1;
+        ext_superblock->s_free_inodes_count--;
+
+
+        // Get the source inode
+        originInode = directorio[i].dir_inodo;
+        EXT_SIMPLE_INODE *sourceInode = &inodos->blq_inodos[originInode];
+        EXT_SIMPLE_INODE *newInode = &inodos->blq_inodos[freeInode];
+
+        // Copy the file size and initialize the new inode
+        newInode->size_fichero = sourceInode->size_fichero;
+        for (j = 0; j < MAX_NUMS_BLOQUE_INODO; j++) {
+            newInode->i_nbloque[j] = NULL_BLOQUE;
+        }
+
+        // Copy the data blocks
+        for (j = 0; j < MAX_NUMS_BLOQUE_INODO; j++) {
+            blockNumber = sourceInode->i_nbloque[j];
+            newInode->i_nbloque[j];
+            if (blockNumber == NULL_BLOQUE) {
+                break;
+            }
+            else{
+                // Find the first free block
+                freeBlock = 0;
+                while (freeBlock < MAX_BLOQUES_PARTICION && ext_bytemaps->bmap_bloques[freeBlock] != 0) {
+                freeBlock++;
+                }
+                if (freeBlock == MAX_BLOQUES_PARTICION) {
+                    return -3; // No free blocks available
+                }
+
+                // Mark the block as occupied
+                ext_bytemaps->bmap_bloques[freeBlock] = 1;
+
+                // Copy the data block
+                memcpy(&memdatos[(freeBlock - PRIM_BLOQUE_DATOS)],
+                &memdatos[(blockNumber - PRIM_BLOQUE_DATOS)],
+                SIZE_BLOQUE);
+
+                // Assign the block to the new inode
+                newInode->i_nbloque[j] = freeBlock;
+
+                // Update the superblock
+                ext_superblock->s_free_blocks_count--;
+            }
+
+            // Debugging: Print allocation info
+            printf("Free blocks remaining: %u\n",
+            ext_superblock->s_free_blocks_count);
+            printf("Free inodes remaining: %u\n",
+            ext_superblock->s_free_inodes_count);
+        }
+
+        // Create the new directory entry
+        strncpy(directorio[dirEntry].dir_nfich, nombredestino, LEN_NFICH);
+        directorio[dirEntry].dir_inodo = freeInode;
+
+        // Write back all changes to the file
+        Grabarinodosydirectorio(directorio, inodos, fich);
+        fflush(fich); // Ensure metadata is written
+        GrabarByteMaps(ext_bytemaps, fich);
+        fflush(fich); // Ensure bytemaps are written
+        GrabarDatos(memdatos, fich);
+        fflush(fich); // Ensure data is written
+        GrabarSuperBloque(ext_superblock, fich);
+
+        return 0; // File successfully copied
+    }
+
+    else if (i == 0)
+    {
+        return -5;
+    }
+    
+}
+
+unsigned int FindFirstFreeInode(EXT_BYTE_MAPS *ext_bytemaps) {
+    // Iterate through the inode bitmap
+    for (unsigned int i = 3; i < MAX_INODOS; i++) {
+        if (ext_bytemaps->bmap_inodos[i] == 0) { // Inode is free
+            return i; // Return the index of the first free inode
+        }
+    }
+    return NULL_INODO; // No free inode found
+}
+
+int removefiles(EXT_ENTRADA_DIR *directorio, EXT_BLQ_INODOS *inodos,
+           EXT_BYTE_MAPS *ext_bytemaps, EXT_SIMPLE_SUPERBLOCK *ext_superblock,
+           EXT_DATOS *memdatos, char *nombrearchivo, FILE *fich)
+{
+    int i, j;
+    int file_position;  // Store the directory position of the file
+    int inode_index;    // Index of the inode corresponding to the file
+    int occupiedBlocks = 0;
+    nombrearchivo[strcspn(nombrearchivo, "\n")] = '\0';
+
+    // Fetch the file position in the directory using the provided fetchfile function
+    file_position = fetchfile(directorio, inodos, nombrearchivo);
+    if (file_position == 0) { // fetchfile returns 0 if the file is not found
+        
+        return -1;
+    }
+    else{
+    // Get the inode index from the directory entry
+    inode_index = directorio[file_position].dir_inodo;
+
+    // Get inode corresponding to the file
+    EXT_SIMPLE_INODE *inode = &inodos->blq_inodos[inode_index];
+
+    // Mark the data blocks as free in the bytemaps
+    for (j = 0; j < MAX_NUMS_BLOQUE_INODO; j++) {
+        if (inode->i_nbloque[j] != NULL_BLOQUE) {
+            ext_bytemaps->bmap_bloques[inode->i_nbloque[j]] = 0;  // Mark block as free
+            inode->i_nbloque[j] = NULL_BLOQUE;                     // Reset block pointer
+            occupiedBlocks++;
+        }
+    }
+
+    // Update the inode: size to 0, mark as free
+    inode->size_fichero = 0;
+    ext_bytemaps->bmap_inodos[inode_index] = 0;  // Mark inode as free
+
+    // Update the directory entry: clear name and mark inode as free
+    strcpy(directorio[file_position].dir_nfich, "");  // Clear file name
+    directorio[file_position].dir_inodo = NULL_INODO;    // Mark inode number as free
+
+    // Update the superblock: increment free blocks and inodes counters
+    ext_superblock->s_free_blocks_count += occupiedBlocks;  // Free all file blocks
+    ext_superblock->s_free_inodes_count++;
+
+    // Write updates back to the file system image
+    GrabarBloque(directorio, sizeof(EXT_ENTRADA_DIR) * MAX_FICHEROS, 1, fich);
+    GrabarBloque(inodos, sizeof(EXT_BLQ_INODOS), 2, fich);
+    GrabarBloque(ext_bytemaps, sizeof(EXT_BYTE_MAPS), 3, fich);
+    GrabarBloque(ext_superblock, sizeof(EXT_SIMPLE_SUPERBLOCK), 0, fich);
+
+
+    return 0;
+    }
 }
